@@ -1,0 +1,635 @@
+import streamlit as st
+import sqlite3
+import pandas as pd
+from datetime import datetime, timedelta
+import os
+from PIL import Image
+import uuid
+import shutil
+import base64   
+
+# 1. PATH SETUP
+DATA_FOLDER = "data"
+os.makedirs(DATA_FOLDER, exist_ok=True)
+DB_PATH = os.path.join(DATA_FOLDER, "sunsys_erp.db")
+ATTACHMENT_PATH = os.path.join(DATA_FOLDER, "attachments")
+os.makedirs(ATTACHMENT_PATH, exist_ok=True)
+
+# 2. UPDATED GET_DB
+def get_db():
+    return sqlite3.connect(DB_PATH)
+
+# 3. DATABASE INITIALIZATION FUNCTION
+def init_db():
+    conn = get_db()
+    c = conn.cursor()
+    # Create Users Table
+    c.execute('''CREATE TABLE IF NOT EXISTS users (
+                 username TEXT PRIMARY KEY, 
+                 password TEXT, 
+                 full_name TEXT, 
+                 dept TEXT, 
+                 designation TEXT, 
+                 phone TEXT, 
+                 role TEXT)''')
+    
+    # Insert Default Admin if not exists
+    c.execute("""INSERT OR IGNORE INTO users (username, password, full_name, dept, designation, phone, role) 
+                 VALUES (?,?,?,?,?,?,?)""",
+              ("admin", "admin2026", "HR Manager", "HR & Admin", "HR Head", "", "Admin"))
+    
+    # Create Tasks Table
+    c.execute('''CREATE TABLE IF NOT EXISTS tasks (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 description TEXT, assigned_to TEXT, dept TEXT,
+                 status TEXT, priority TEXT, frequency TEXT,
+                 due_date TEXT, due_time TEXT, admin_file TEXT, 
+                 emp_remark TEXT, emp_screenshot TEXT, timestamp TEXT)''')
+    
+    conn.commit()
+    conn.close()
+
+# 4. CRITICAL: TRIGGER INITIALIZATION
+# This must run before the login_page() call
+init_db()
+# ===================================================================
+
+path = os.path.join(DATA_FOLDER, "attachments")
+
+if os.path.isfile(path):
+    os.remove(path) 
+    os.makedirs(path, exist_ok=True)
+else:
+    os.makedirs(path, exist_ok=True)        
+
+
+# ====================== DATABASE SETUP ======================
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    
+    c.execute("DROP TABLE IF EXISTS users")
+    c.execute('''CREATE TABLE users (
+                 username TEXT PRIMARY KEY, 
+                 password TEXT, 
+                 full_name TEXT, 
+                 dept TEXT, 
+                 designation TEXT, 
+                 phone TEXT, 
+                 role TEXT)''')
+    
+    c.execute("""INSERT INTO users (username, password, full_name, dept, designation, phone, role) 
+                 VALUES (?,?,?,?,?,?,?)""",
+              ("admin", "admin2026", "HR Manager", "HR & Admin", "HR Head", "", "Admin"))
+    
+    employees = [
+        ("Aditya", "student2026", "Aditya Kumar", "Technical Support", "Solar Technician", "919100000000", "Employee"),
+        ("Rahul", "student2026", "Rahul Sharma", "Solar Installation", "Installation Engineer", "919100000001", "Employee"),
+        ("Priya", "student2026", "Priya Singh", "Accounts", "Accounts Executive", "919100000002", "Employee")
+    ]
+    for emp in employees:
+        c.execute("""INSERT OR IGNORE INTO users 
+                     (username, password, full_name, dept, designation, phone, role) 
+                     VALUES (?,?,?,?,?,?,?)""", emp)
+    
+    c.execute('''CREATE TABLE IF NOT EXISTS tasks (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 description TEXT, assigned_to TEXT, dept TEXT,
+                 status TEXT, priority TEXT, frequency TEXT,
+                 due_date TEXT, admin_file TEXT, emp_remark TEXT,
+                 emp_screenshot TEXT, timestamp TEXT)''')
+    
+def migrate_db():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    # Add due_time column if it doesn't exist
+    try:
+        c.execute("ALTER TABLE tasks ADD COLUMN due_time TEXT")
+    except:
+        pass
+    # Note: We will reuse admin_file and emp_screenshot to store paths 
+    # but allow them to hold any file type now.
+    conn.commit()
+    conn.close()
+
+migrate_db()
+    
+
+# ====================== HELPER FUNCTION TO DISPLAY PDF (New Feature) ======================
+def display_pdf(pdf_path):
+    if pdf_path and os.path.exists(pdf_path):
+        with open(pdf_path, "rb") as f:
+            base64_pdf = base64.b64encode(f.read()).decode('utf-8')
+        pdf_display = f'''
+            <iframe src="data:application/pdf;base64,{base64_pdf}" 
+                    width="100%" height="600" 
+                    type="application/pdf">
+            </iframe>
+        '''
+        st.markdown(pdf_display, unsafe_allow_html=True)
+    else:
+        st.info("No PDF attached for this task.")
+
+# ====================== ATTRACTIVE UI/UX STYLING ======================
+st.set_page_config(page_title="SunSys ERP", page_icon="☀️", layout="wide")
+
+st.markdown("""
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+    
+    html, body, [class*="css"] { font-family: 'Inter', sans-serif; font-size: 18px !important; }
+    h1 { font-size: 48px !important; font-weight: 700; }
+    h2 { font-size: 36px !important; }
+    h3 { font-size: 28px !important; }
+    
+    .main-header { 
+        background: linear-gradient(135deg, #1C4694 0%, #E47F15 100%); 
+        padding: 30px; border-radius: 20px; color: white; 
+        margin-bottom: 25px; box-shadow: 0 8px 25px rgba(0,0,0,0.2);
+    }
+    
+    .live-time { 
+        font-size: 22px; font-weight: 700; color: #E47F15; 
+        background: white; padding: 15px; border-radius: 15px; 
+        box-shadow: 0 4px 15px rgba(0,0,0,0.1); text-align: center;
+    }
+    
+    .card { 
+        background: white; padding: 25px; border-radius: 18px; 
+        box-shadow: 0 6px 20px rgba(0,0,0,0.1); margin-bottom: 20px;
+    }
+    
+    .stButton>button { 
+        height: 55px; font-weight: 700; border-radius: 14px; 
+        background: linear-gradient(90deg, #1C4694, #E47F15); color: white;
+        font-size: 18px;
+    }
+    
+    .stDataFrame { font-size: 18px !important; }
+    </style>
+""", unsafe_allow_html=True)
+
+# ====================== HEADER WITH LIVE TIME & DATE ======================
+import streamlit.components.v1 as components
+
+col1, col2, col3 = st.columns([1.2, 3.5, 2.2])
+
+with col1:
+    if os.path.exists("sunsys logo.jpeg"):
+        st.image("sunsys logo.jpeg", width=200)
+    else:
+        st.title("☀️ SunSys")
+
+with col2:
+    st.markdown('<div class="main-header"><h1>SunSys ERP Portal</h1></div>', unsafe_allow_html=True)
+
+with col3:
+    components.html(
+        """
+        <div style="
+            background: rgba(28, 70, 148, 0.05); 
+            padding: 15px; 
+            border-radius: 12px; 
+            border-left: 5px solid #E47F15;
+            font-family: 'Segoe UI', sans-serif;
+            text-align: center;
+        ">
+            <div id="date" style="font-size: 14px; color: #666; font-weight: 600;"></div>
+            <div id="clock" style="font-size: 28px; color: #1C4694; font-weight: 800; margin-top: 5px;"></div>
+        </div>
+
+        <script>
+            function updateClock() {
+                const now = new Date();
+                const dateOptions = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+                document.getElementById('date').innerText = now.toLocaleDateString('en-US', dateOptions);
+                const timeOptions = { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true };
+                document.getElementById('clock').innerText = now.toLocaleTimeString('en-US', timeOptions);
+            }
+            setInterval(updateClock, 1000);
+            updateClock();
+        </script>
+        """,
+        height=110,
+    )
+
+# ====================== AUTHENTICATION ======================
+if "auth" not in st.session_state:
+    st.session_state.update({"auth": False, "role": None, "user": None, "dept": None})
+
+def login_page():
+    st.markdown("<h2 style='text-align:center; color:#1C4694;'>🔐 Department Center Login</h2>", unsafe_allow_html=True)
+    with st.container(border=True):
+        role = st.radio("Select Access Type", ["Employee", "HR Admin"], horizontal=True)
+        
+        if role == "HR Admin":
+            username = st.text_input("Admin Username")
+            password = st.text_input("Password", type="password")
+            if st.button("Enter HR Command Center", use_container_width=True):
+                conn = sqlite3.connect(DB_PATH)
+                result = conn.execute("SELECT dept FROM users WHERE username=? AND password=? AND role='Admin'", 
+                                    (username, password)).fetchone()
+                conn.close()
+                if result:
+                    st.session_state.update({"auth": True, "role": "Admin", "user": username})
+                    st.rerun()
+                else:
+                    st.error("❌ Invalid Admin Credentials")
+        
+        else:
+            username = st.text_input("Employee Username")
+            password = st.text_input("Password", type="password")
+            selected_dept = st.selectbox("Choose Your Department Center", 
+                                       ["Solar Installation", "Technical Support", "Sales & Marketing", "HR & Admin", "Accounts"])
+            
+            if st.button("Enter My Department Center", use_container_width=True):
+                conn = sqlite3.connect(DB_PATH)
+                result = conn.execute("SELECT dept FROM users WHERE username=? AND password=? AND role='Employee'", 
+                                    (username, password)).fetchone()
+                conn.close()
+                if result and result[0] == selected_dept:
+                    st.session_state.update({"auth": True, "role": "Employee", "user": username, "dept": selected_dept})
+                    st.rerun()
+                else:
+                    st.error("❌ Invalid credentials or wrong Department Center selected")
+
+if not st.session_state.auth:
+    login_page()
+    st.stop()
+
+if st.sidebar.button("🚪 Logout"):
+    st.session_state.auth = False
+    st.rerun()
+
+def get_db():
+    return sqlite3.connect(DB_PATH)
+
+# ====================== ADMIN PANEL ======================
+if st.session_state.role == "Admin":
+    st.header("📊 HR Command Center")
+    
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📋 Assign Task", "👥 Team Overview", "✏️ Edit/Delete", "📊 Dashboard", "➕ Add/Remove Employee"])
+    
+    with tab1:
+        st.subheader("Assign New Task")
+        with st.form("assign_task", clear_on_submit=True):
+            desc = st.text_area("Task Description", height=140)
+            c1, c2, c3, c4 = st.columns(4)
+            dept = c1.selectbox("Department", ["Solar Installation", "Technical Support", "Sales & Marketing", "HR & Admin", "Accounts"])
+            
+            emps_df = pd.read_sql("SELECT username, full_name FROM users WHERE role='Employee' AND dept=?", get_db(), params=(dept,))
+            employee_list = [f"{row['full_name']} ({row['username']})" for _, row in emps_df.iterrows()] if not emps_df.empty else ["No employees in this department"]
+            
+            selected_emp = c2.selectbox("Assign To", employee_list)
+            assigned_to = selected_emp.split("(")[-1].strip(")") if "(" in selected_emp else None
+            
+            priority = c3.selectbox("Priority", ["High", "Medium", "Low"])
+            frequency = c4.selectbox("Frequency", ["Daily", "Weekly", "Fortnightly", "One-Time"])
+            
+            # --- NEW TIME & FILE OPTIONS ---
+            col_date, col_time = st.columns(2)
+            due_date = col_date.date_input("Due Date", datetime.now().date() + timedelta(days=7))
+            due_time = col_time.time_input("Due Time (Deadline)", value=datetime.now().time())
+            
+            admin_file = st.file_uploader("Attach Resources (PDF, Excel, Video, Image)", 
+                                        type=["pdf", "xlsx", "xls", "mp4", "jpg", "png", "jpeg"])
+            
+            if st.form_submit_button("🚀 Assign Task"):
+                if desc and assigned_to:
+                    file_path = ""
+                    if admin_file:
+                        os.makedirs("attachments", exist_ok=True)
+                        file_ext = admin_file.name.split('.')[-1]
+                        file_path = os.path.join("attachments", f"admin_{uuid.uuid4().hex[:8]}.{file_ext}")
+                        with open(file_path, "wb") as f:
+                            f.write(admin_file.getbuffer())
+                    
+                    conn = get_db()
+                    conn.execute("""INSERT INTO tasks 
+                                 (description, assigned_to, dept, status, priority, frequency, due_date, due_time, admin_file, timestamp)
+                                 VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                                 (desc, assigned_to, dept, "Pending", priority, frequency, 
+                                  due_date.strftime("%Y-%m-%d"), due_time.strftime("%H:%M"), file_path, datetime.now().strftime("%Y-%m-%d %H:%M")))
+                    conn.commit()
+                    conn.close()
+                    st.success("✅ Work Assigned Successfully with Deadline!")
+                    st.rerun()
+
+    with tab2:
+        st.subheader("👥 Team Member Directory")
+        employees = pd.read_sql("SELECT username, full_name, dept, designation, phone FROM users WHERE role='Employee'", get_db())
+        
+        if employees.empty:
+            st.info("No employees added yet.")
+        else:
+            selected_member = st.selectbox("Select Team Member to View Details", employees['full_name'].tolist())
+            member = employees[employees['full_name'] == selected_member].iloc[0]
+            
+            st.markdown(f"""
+                <div class="card">
+                    <h3>{member['full_name']}</h3>
+                    <p><strong>Department:</strong> {member['dept']}<br>
+                       <strong>Designation:</strong> {member['designation']}<br>
+                       <strong>Phone:</strong> {member['phone']}</p>
+                </div>
+            """, unsafe_allow_html=True)
+            
+            if member['phone']:
+                wa_link = f"https://wa.me/{member['phone']}?text=Hello%20{member['full_name']}%2C%20regarding%20your%20task..."
+                st.markdown(f"[💬 Message on WhatsApp]({wa_link})")
+            
+            st.divider()
+            st.subheader(f"Tasks & Proofs for {member['full_name']}")
+            
+            tasks_df = pd.read_sql(""" 
+                SELECT id, description, status, priority, frequency, due_date, 
+                       emp_remark, emp_screenshot 
+                FROM tasks 
+                WHERE assigned_to = ?
+            """, get_db(), params=(member['username'],))
+            
+            if tasks_df.empty:
+                st.info("No tasks assigned yet.")
+            else:
+                for _, row in tasks_df.iterrows():
+                    with st.container(border=True):
+                        st.write(f"**Task:** {row['description']}")
+                        st.caption(f"Status: **{row['status']}** | Priority: **{row['priority']}** | Frequency: **{row['frequency']}** | Due: **{row.get('due_date','N/A')}**")
+                        
+                        if row.get('emp_remark'):
+                            st.write(f"**Employee Remark:** {row['emp_remark']}")
+                        
+                        if row.get('emp_screenshot') and os.path.exists(row['emp_screenshot']):
+                            try:
+                                st.image(row['emp_screenshot'], width=400, caption="📸 Screenshot Uploaded by Employee")
+                            except:
+                                st.warning("Unable to load screenshot preview")
+                        else:
+                            st.info("No screenshot uploaded yet.")
+                        
+                        st.divider()
+
+    with tab3:
+        st.subheader("Edit / Delete Task")
+        all_tasks = pd.read_sql("SELECT id, description FROM tasks ORDER BY id DESC", get_db())
+        
+        if all_tasks.empty:
+            st.info("No tasks available.")
+        else:
+            task_options = [f"ID {row['id']}: {row['description'][:50]}..." for _, row in all_tasks.iterrows()]
+            selected_task_option = st.selectbox("Select Task", task_options)
+            task_id = int(selected_task_option.split(":")[0].replace("ID ", ""))
+            
+            task_data = pd.read_sql("SELECT * FROM tasks WHERE id=?", get_db(), params=(task_id,)).iloc[0]
+            
+            with st.form("edit_form"):
+                new_desc = st.text_area("Task Description", value=task_data['description'], height=100)
+                new_status = st.selectbox("Status", ["Pending", "In Progress", "Need Help", "Work Completed"], 
+                                        index=["Pending","In Progress","Need Help","Work Completed"].index(task_data['status']))
+                new_priority = st.selectbox("Priority", ["High", "Medium", "Low"], 
+                                          index=["High","Medium","Low"].index(task_data['priority']))
+                new_due = st.date_input("Due Date", value=datetime.strptime(task_data['due_date'], "%Y-%m-%d").date() if task_data['due_date'] else datetime.now().date())
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.form_submit_button("💾 Update Task"):
+                        conn = get_db()
+                        conn.execute("""UPDATE tasks SET description=?, status=?, priority=?, due_date=? WHERE id=?""",
+                                    (new_desc, new_status, new_priority, new_due.strftime("%Y-%m-%d"), task_id))
+                        conn.commit()
+                        conn.close()
+                        st.success("Task updated successfully!")
+                        st.rerun()
+                
+                with col2:
+                    if st.form_submit_button("🗑️ Delete Task", type="secondary"):
+                        if st.checkbox("Are you sure you want to delete this task?"):
+                            conn = get_db()
+                            conn.execute("DELETE FROM tasks WHERE id=?", (task_id,))
+                            conn.commit()
+                            conn.close()
+                            st.success("Task deleted successfully!")
+                            st.rerun()
+
+    with tab4:
+        st.subheader("📊 Overall Dashboard & Task Analytics")
+        col1, col2, col3, col4 = st.columns(4)
+        
+        total_tasks = pd.read_sql("SELECT COUNT(*) as count FROM tasks", get_db()).iloc[0]['count']
+        completed = pd.read_sql("SELECT COUNT(*) as count FROM tasks WHERE status='Work Completed'", get_db()).iloc[0]['count']
+        pending = pd.read_sql("SELECT COUNT(*) as count FROM tasks WHERE status != 'Work Completed'", get_db()).iloc[0]['count']
+        overdue = pd.read_sql(""" 
+            SELECT COUNT(*) as count FROM tasks 
+            WHERE due_date < ? AND status != 'Work Completed'
+        """, get_db(), params=(datetime.now().date().strftime("%Y-%m-%d"),)).iloc[0]['count']
+        
+        with col1:
+            st.metric("Total Tasks", total_tasks)
+        with col2:
+            st.metric("Completed", completed, delta=f"{completed} done")
+        with col3:
+            st.metric("Pending", pending)
+        with col4:
+            st.metric("Overdue", overdue, delta=f"{overdue} urgent", delta_color="inverse")
+        
+        st.divider()
+        st.subheader("📋 All Tasks Overview")
+        detailed_df = pd.read_sql(""" 
+            SELECT 
+                t.id,
+                t.description as task_description,
+                u.full_name as employee_name,
+                t.dept as department,
+                t.status,
+                t.priority,
+                t.frequency,
+                t.due_date,
+                t.timestamp as assigned_date,
+                t.emp_remark as employee_remark
+            FROM tasks t
+            LEFT JOIN users u ON t.assigned_to = u.username
+            ORDER BY t.id DESC
+        """, get_db())
+        
+        if not detailed_df.empty:
+            st.dataframe(
+                detailed_df,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "task_description": st.column_config.TextColumn("Task Description", width="medium"),
+                    "employee_name": st.column_config.TextColumn("Employee Name"),
+                    "department": st.column_config.TextColumn("Department"),
+                    "status": st.column_config.TextColumn("Status"),
+                    "priority": st.column_config.TextColumn("Priority"),
+                    "due_date": st.column_config.TextColumn("Due Date"),
+                    "assigned_date": st.column_config.TextColumn("Assigned On"),
+                    "employee_remark": st.column_config.TextColumn("Employee Remark")
+                }
+            )
+        else:
+            st.info("No tasks have been assigned yet.")
+        
+        st.divider()
+        st.subheader("📍 Department-wise Task Summary")
+        dept_summary = pd.read_sql(""" 
+            SELECT 
+                t.dept as department,
+                COUNT(*) as total_tasks,
+                SUM(CASE WHEN t.status = 'Work Completed' THEN 1 ELSE 0 END) as completed,
+                SUM(CASE WHEN t.status != 'Work Completed' THEN 1 ELSE 0 END) as pending,
+                SUM(CASE WHEN t.due_date < ? AND t.status != 'Work Completed' THEN 1 ELSE 0 END) as overdue
+            FROM tasks t
+            GROUP BY t.dept
+        """, get_db(), params=(datetime.now().date().strftime("%Y-%m-%d"),))
+        
+        st.dataframe(dept_summary, use_container_width=True, hide_index=True)
+
+    with tab5:
+        col_add, col_rem = st.columns(2)
+        
+        with col_add:
+            st.subheader("➕ Add New Employee")
+            with st.form("add_new_employee", clear_on_submit=True):
+                full_name = st.text_input("Full Name *")
+                username = st.text_input("Username (Login ID) *")
+                password = st.text_input("Password *", type="password")
+                dept = st.selectbox("Department", 
+                                  ["Solar Installation", "Technical Support", "Sales & Marketing", "HR & Admin", "Accounts"])
+                designation = st.text_input("Designation")
+                phone = st.text_input("Phone Number")
+                
+                if st.form_submit_button("✅ Add Employee", type="primary"):
+                    if full_name and username and password and dept:
+                        try:
+                            conn = get_db()
+                            conn.execute("""INSERT INTO users 
+                                         (username, password, full_name, dept, designation, phone, role) 
+                                         VALUES (?,?,?,?,?,?,?)""",
+                                         (username, password, full_name, dept, designation, phone, "Employee"))
+                            conn.commit()
+                            conn.close()
+                            st.success(f"✅ Employee **{full_name}** added!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ Username '{username}' already exists.")
+                    else:
+                        st.error("Please fill all required fields (*)")
+
+        with col_rem:
+            st.subheader("🗑️ Remove Employee")
+            emp_list_df = pd.read_sql("SELECT username, full_name, dept FROM users WHERE role='Employee'", get_db())
+            
+            if emp_list_df.empty:
+                st.info("No employees found in database.")
+            else:
+                options = {f"{row['full_name']} ({row['username']}) - {row['dept']}": row['username'] 
+                           for _, row in emp_list_df.iterrows()}
+                
+                selected_to_remove = st.selectbox("Select Employee to Remove", options.keys())
+                target_user = options[selected_to_remove]
+                
+                confirm = st.checkbox(f"I confirm I want to delete {target_user}")
+                
+                if st.button("❌ Permanent Delete", type="secondary", use_container_width=True):
+                    if confirm:
+                        conn = get_db()
+                        conn.execute("DELETE FROM users WHERE username=?", (target_user,))
+                        conn.execute("DELETE FROM tasks WHERE assigned_to=?", (target_user,))
+                        conn.commit()
+                        conn.close()
+                        st.warning(f"Employee {target_user} and their tasks have been removed.")
+                        st.rerun()
+                    else:
+                        st.error("Please check the confirmation box first.")
+
+    st.divider()
+    st.caption("© 2026 SunSys ERP Portal by Aditya kumar | All rights reserved.")
+
+# ====================== EMPLOYEE PANEL ======================
+elif st.session_state.role == "Employee":
+    st.header(f"🚀 {st.session_state.dept} Center • Welcome, {st.session_state.user}")
+    
+    # Create tabs for Tasks and Security
+    tab_tasks, tab_security = st.tabs(["📋 My Tasks", "🔐 Security & Password"])
+
+    with tab_tasks:
+        conn = get_db()
+        tasks = pd.read_sql("SELECT * FROM tasks WHERE assigned_to = ?", conn, params=(st.session_state.user,))
+        
+        if tasks.empty:
+            st.info("No tasks assigned to you yet.")
+        else:
+            for _, row in tasks.iterrows():
+                with st.container(border=True):
+                    st.subheader(f"Task: {row['description']}")
+                    st.warning(f"⏰ **Deadline:** {row['due_date']} at {row.get('due_time', 'Not set')}")
+                    
+                    # Resources Section
+                    if row.get('admin_file') and os.path.exists(row['admin_file']):
+                        file_ext = row['admin_file'].split('.')[-1].lower()
+                        with open(row['admin_file'], "rb") as f:
+                            st.download_button(
+                                label=f"Download Admin Brief ({file_ext.upper()})",
+                                data=f,
+                                file_name=f"task_{row['id']}_brief.{file_ext}",
+                                key=f"dl_{row['id']}"
+                            )
+                    
+                    st.divider()
+                    
+                    col_status, col_upload = st.columns(2)
+                    with col_status:
+                        new_status = st.selectbox("Update Status", ["Pending", "In Progress", "Work Completed"], key=f"s_{row['id']}")
+                        remark = st.text_area("Notes", value=row.get('emp_remark', ''), key=f"r_{row['id']}")
+                    with col_upload:
+                        proof_file = st.file_uploader("Upload Proof (PDF/Excel/Video/Image)", key=f"p_{row['id']}")
+
+                    if st.button("🚀 Submit Update", key=f"b_{row['id']}", type="primary"):
+                        # Logic to save file and update DB (Same as previous step)
+                        final_path = row.get('emp_screenshot')
+                        if proof_file:
+                            file_ext = proof_file.name.split('.')[-1]
+                            final_path = os.path.join("attachments", f"proof_{row['id']}_{uuid.uuid4().hex[:5]}.{file_ext}")
+                            with open(final_path, "wb") as f:
+                                f.write(proof_file.getbuffer())
+                        
+                        conn.execute("UPDATE tasks SET status=?, emp_remark=?, emp_screenshot=? WHERE id=?", 
+                                     (new_status, remark, final_path, row['id']))
+                        conn.commit()
+                        st.success("✅ Work updated!")
+                        st.rerun()
+        conn.close()
+
+    with tab_security:
+        st.subheader("Update Your Password")
+        st.info("Keep your account secure by choosing a strong password.")
+        
+        with st.form("change_password_form"):
+            current_pass = st.text_input("Current Password", type="password")
+            new_pass = st.text_input("New Password", type="password")
+            confirm_pass = st.text_input("Confirm New Password", type="password")
+            
+            if st.form_submit_button("Update Password"):
+                conn = get_db()
+                # Verify current password
+                user_data = conn.execute("SELECT password FROM users WHERE username=?", 
+                                        (st.session_state.user,)).fetchone()
+                
+                if not current_pass or not new_pass:
+                    st.error("Please fill all fields.")
+                elif user_data[0] != current_pass:
+                    st.error("❌ Current password is incorrect.")
+                elif new_pass != confirm_pass:
+                    st.error("❌ New passwords do not match.")
+                elif len(new_pass) < 6:
+                    st.warning("⚠️ New password should be at least 6 characters long.")
+                else:
+                    conn.execute("UPDATE users SET password=? WHERE username=?", 
+                                 (new_pass, st.session_state.user))
+                    conn.commit()
+                    st.success("✅ Password updated successfully! Please login again next time.")
+                conn.close()
+
+    st.divider()
+    st.caption("© 2026 SunSys ERP Portal by Aditya kumar | All rights reserved.")
