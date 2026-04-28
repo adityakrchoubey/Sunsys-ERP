@@ -300,7 +300,8 @@ if st.session_state.role == "Admin":
                     if admin_file:
                         os.makedirs("attachments", exist_ok=True)
                         file_ext = admin_file.name.split('.')[-1]
-                        file_path = os.path.join("attachments", f"admin_{uuid.uuid4().hex[:8]}.{file_ext}")
+                        final_path = os.path.join("attachments", f"proof_{row['id']}_{uuid.uuid4().hex[:5]}.{file_ext}")
+                        os.makedirs(os.path.dirname(final_path), exist_ok=True)
                         with open(file_path, "wb") as f:
                             f.write(admin_file.getbuffer())
                     
