@@ -360,13 +360,40 @@ if st.session_state.role == "Admin":
                         if row.get('emp_remark'):
                             st.write(f"**Employee Remark:** {row['emp_remark']}")
                         
-                        if row.get('emp_screenshot') and os.path.exists(row['emp_screenshot']):
-                            try:
-                                st.image(row['emp_screenshot'], width=400, caption="📸 Screenshot Uploaded by Employee")
-                            except:
-                                st.warning("Unable to load screenshot preview")
-                        else:
-                            st.info("No screenshot uploaded yet.")
+                         # NEW UPDATED ADMIN PROOF VIEW
+if row.get('emp_screenshot'):
+    # Split the paths stored in the database
+    file_paths = row['emp_screenshot'].split(',')
+    st.write("**Attached Proofs:**")
+    
+    # Create 3 columns for a neat grid layout of images
+    img_cols = st.columns(3) 
+    img_idx = 0
+    
+    for f_path in file_paths:
+        f_path = f_path.strip()
+        if os.path.exists(f_path):
+            ext = f_path.split('.')[-1].lower()
+            file_name = os.path.basename(f_path)
+            
+            # 1. If it's an image, show a preview in the grid
+            if ext in ['jpg', 'jpeg', 'png']:
+                with img_cols[img_idx % 3]:
+                    st.image(f_path, use_container_width=True, caption=f"Image: {file_name}")
+                img_idx += 1
+            
+            # 2. For everything else (PDF, Excel, Video), show a download button
+            else:
+                with st.expander(f"📁 View {ext.upper()} File: {file_name}"):
+                    with open(f_path, "rb") as f:
+                        st.download_button(
+                            label=f"📥 Download {file_name}",
+                            data=f,
+                            file_name=file_name,
+                            key=f"admin_dl_{uuid.uuid4().hex[:5]}"
+                        )
+else:
+    st.info("No proofs uploaded yet.")
                         
                         st.divider()
 
@@ -584,26 +611,37 @@ elif st.session_state.role == "Employee":
                         new_status = st.selectbox("Update Status", ["Pending", "In Progress", "Work Completed","Need Help"],key=f"s_{row['id']}")
                         remark = st.text_area("Notes", value=row.get('emp_remark', ''), key=f"r_{row['id']}")
                     with col_upload:
-                        proof_file = st.file_uploader("Upload Proof (PDF/Excel/Video/Image)", key=f"p_{row['id']}")
+                         proof_files = st.file_uploader("Upload Proofs (Images, PDFs, Excel, Videos)", 
+                               type=["pdf", "xlsx", "xls", "mp4", "jpg", "png", "jpeg"], 
+                               accept_multiple_files=True, 
+                               key=f"p_{row['id']}")
 
                     if st.button("🚀 Submit Update", key=f"b_{row['id']}", type="primary"):
-                        # Logic to save file and update DB (Same as previous step)
-                        final_path = row.get('emp_screenshot')
-                        if proof_file:
-                            file_ext = proof_file.name.split('.')[-1]
-                            final_path = os.path.join("attachments", f"proof_{row['id']}_{uuid.uuid4().hex[:5]}.{file_ext}")
-                            os.makedirs(os.path.dirname(final_path), exist_ok=True)
-                            with open(final_path, "wb") as f:
-                                f.write(proof_file.getbuffer())
-                        
-                        conn.execute("UPDATE tasks SET status=?, emp_remark=?, emp_screenshot=? WHERE id=?", 
-                                     (new_status, remark, final_path, row['id']))
-                        conn.commit()
-                        st.success("✅ Your update has been sent to HR successfully!")  
-                        st.toast("Sent to HR ✅") 
-                        st.caption(f"Submitted on: {datetime.now().strftime('%d-%m-%Y %H:%M')}")
-                        
-                        st.rerun()
+    file_path_list = []
+    
+    # If new files are uploaded, process them
+    if proof_files:
+        for uploaded_file in proof_files:
+            file_ext = uploaded_file.name.split('.')[-1].lower()
+            unique_name = f"proof_{row['id']}_{uuid.uuid4().hex[:5]}.{file_ext}"
+            final_path = os.path.join("data", "attachments", unique_name)
+            
+            os.makedirs(os.path.dirname(final_path), exist_ok=True)
+            with open(final_path, "wb") as f:
+                f.write(uploaded_file.getbuffer())
+            file_path_list.append(final_path)
+        
+        # Save multiple paths as a comma-separated string
+        all_paths_str = ",".join(file_path_list)
+    else:
+        # Keep existing proof if no new files are uploaded
+        all_paths_str = row.get('emp_screenshot')
+
+    conn.execute("UPDATE tasks SET status=?, emp_remark=?, emp_screenshot=? WHERE id=?", 
+                 (new_status, remark, all_paths_str, row['id']))
+    conn.commit()
+    st.success(f"✅ {len(file_path_list)} files submitted successfully!")
+    st.rerun()
         conn.close()
 
     with tab_security:
