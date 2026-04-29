@@ -392,7 +392,7 @@ if row.get('emp_screenshot'):
                             file_name=file_name,
                             key=f"admin_dl_{uuid.uuid4().hex[:5]}"
                         )
-     else:
+else:
     st.info("No proofs uploaded yet.")
                         
     st.divider()
