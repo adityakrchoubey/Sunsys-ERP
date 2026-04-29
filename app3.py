@@ -581,7 +581,7 @@ elif st.session_state.role == "Employee":
                     
                     col_status, col_upload = st.columns(2)
                     with col_status:
-                        new_status = st.selectbox("Update Status", ["Pending", "In Progress", "Work Completed"], key=f"s_{row['id']}")
+                        new_status = st.selectbox("Update Status", ["Pending", "In Progress", "Work Completed","Need Help"],key=f"s_{row['id']}")
                         remark = st.text_area("Notes", value=row.get('emp_remark', ''), key=f"r_{row['id']}")
                     with col_upload:
                         proof_file = st.file_uploader("Upload Proof (PDF/Excel/Video/Image)", key=f"p_{row['id']}")
