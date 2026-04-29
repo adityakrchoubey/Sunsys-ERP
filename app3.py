@@ -592,6 +592,7 @@ elif st.session_state.role == "Employee":
                         if proof_file:
                             file_ext = proof_file.name.split('.')[-1]
                             final_path = os.path.join("attachments", f"proof_{row['id']}_{uuid.uuid4().hex[:5]}.{file_ext}")
+                            os.makedirs(os.path.dirname(final_path), exist_ok=True)
                             with open(final_path, "wb") as f:
                                 f.write(proof_file.getbuffer())
                         
