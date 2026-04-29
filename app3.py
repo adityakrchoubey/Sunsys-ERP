@@ -599,7 +599,10 @@ elif st.session_state.role == "Employee":
                         conn.execute("UPDATE tasks SET status=?, emp_remark=?, emp_screenshot=? WHERE id=?", 
                                      (new_status, remark, final_path, row['id']))
                         conn.commit()
-                        st.success("✅ Work updated!")
+                        st.success("✅ Your update has been sent to HR successfully!")  
+                        st.toast("Sent to HR ✅") 
+                        st.caption(f"Submitted on: {datetime.now().strftime('%d-%m-%Y %H:%M')}")
+                        
                         st.rerun()
         conn.close()
 
