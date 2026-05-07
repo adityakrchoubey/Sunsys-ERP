@@ -6,7 +6,8 @@ import os
 from PIL import Image
 import uuid
 import shutil
-import base64   
+import base64
+import json   
 
 # 1. PATH SETUP
 DATA_FOLDER = "data"
@@ -64,41 +65,9 @@ else:
 
 
 # ====================== DATABASE SETUP ======================
-def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    
-    c.execute("DROP TABLE IF EXISTS users")
-    c.execute('''CREATE TABLE users (
-                 username TEXT PRIMARY KEY, 
-                 password TEXT, 
-                 full_name TEXT, 
-                 dept TEXT, 
-                 designation TEXT, 
-                 phone TEXT, 
-                 role TEXT)''')
-    
-    c.execute("""INSERT INTO users (username, password, full_name, dept, designation, phone, role) 
-                 VALUES (?,?,?,?,?,?,?)""",
-              ("admin", "admin2026", "HR Manager", "HR & Admin", "HR Head", "", "Admin"))
-    
-    employees = [
-        ("Aditya", "student2026", "Aditya Kumar", "Technical Support", "Solar Technician", "919100000000", "Employee"),
-        ("Rahul", "student2026", "Rahul Sharma", "Solar Installation", "Installation Engineer", "919100000001", "Employee"),
-        ("Priya", "student2026", "Priya Singh", "Accounts", "Accounts Executive", "919100000002", "Employee")
-    ]
-    for emp in employees:
-        c.execute("""INSERT OR IGNORE INTO users 
-                     (username, password, full_name, dept, designation, phone, role) 
-                     VALUES (?,?,?,?,?,?,?)""", emp)
-    
-    c.execute('''CREATE TABLE IF NOT EXISTS tasks (
-                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                 description TEXT, assigned_to TEXT, dept TEXT,
-                 status TEXT, priority TEXT, frequency TEXT,
-                 due_date TEXT, admin_file TEXT, emp_remark TEXT,
-                 emp_screenshot TEXT, timestamp TEXT)''')
-    
+# Second init_db removed to prevent duplicate definitions
+
+# ====================== HELPER FUNCTION TO MIGRATE DB ======================
 def migrate_db():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -107,8 +76,15 @@ def migrate_db():
         c.execute("ALTER TABLE tasks ADD COLUMN due_time TEXT")
     except:
         pass
-    # Note: We will reuse admin_file and emp_screenshot to store paths 
-    # but allow them to hold any file type now.
+    # Add columns for multiple file storage as JSON
+    try:
+        c.execute("ALTER TABLE tasks ADD COLUMN admin_files_json TEXT DEFAULT '[]'")
+    except:
+        pass
+    try:
+        c.execute("ALTER TABLE tasks ADD COLUMN emp_files_json TEXT DEFAULT '[]'")
+    except:
+        pass
     conn.commit()
     conn.close()
 
@@ -226,15 +202,17 @@ def login_page():
             username = st.text_input("Admin Username")
             password = st.text_input("Password", type="password")
             if st.button("Enter HR Command Center", use_container_width=True):
-                conn = sqlite3.connect(DB_PATH)
-                result = conn.execute("SELECT dept FROM users WHERE username=? AND password=? AND role='Admin'", 
-                                    (username, password)).fetchone()
-                conn.close()
-                if result:
-                    st.session_state.update({"auth": True, "role": "Admin", "user": username})
-                    st.rerun()
-                else:
-                    st.error("❌ Invalid Admin Credentials")
+                try:
+                    conn = sqlite3.connect(DB_PATH)
+                    result = conn.execute("SELECT dept FROM users WHERE username=? AND password=? AND role='Admin'", 
+                                        (username, password)).fetchone()
+                    if result:
+                        st.session_state.update({"auth": True, "role": "Admin", "user": username})
+                        st.rerun()
+                    else:
+                        st.error("❌ Invalid Admin Credentials")
+                finally:
+                    conn.close()
         
         else:
             username = st.text_input("Employee Username")
@@ -243,15 +221,17 @@ def login_page():
                                        ["Solar Installation", "Technical Support", "Sales & Marketing", "HR & Admin", "Accounts"])
             
             if st.button("Enter My Department Center", use_container_width=True):
-                conn = sqlite3.connect(DB_PATH)
-                result = conn.execute("SELECT dept FROM users WHERE username=? AND password=? AND role='Employee'", 
-                                    (username, password)).fetchone()
-                conn.close()
-                if result and result[0] == selected_dept:
-                    st.session_state.update({"auth": True, "role": "Employee", "user": username, "dept": selected_dept})
-                    st.rerun()
-                else:
-                    st.error("❌ Invalid credentials or wrong Department Center selected")
+                try:
+                    conn = sqlite3.connect(DB_PATH)
+                    result = conn.execute("SELECT dept FROM users WHERE username=? AND password=? AND role='Employee'", 
+                                        (username, password)).fetchone()
+                    if result and result[0] == selected_dept:
+                        st.session_state.update({"auth": True, "role": "Employee", "user": username, "dept": selected_dept})
+                        st.rerun()
+                    else:
+                        st.error("❌ Invalid credentials or wrong Department Center selected")
+                finally:
+                    conn.close()
 
 if not st.session_state.auth:
     login_page()
@@ -261,9 +241,6 @@ if st.sidebar.button("🚪 Logout"):
     st.session_state.auth = False
     st.rerun()
 
-def get_db():
-    return sqlite3.connect(DB_PATH)
-
 # ====================== ADMIN PANEL ======================
 if st.session_state.role == "Admin":
     st.header("📊 HR Command Center")
@@ -272,16 +249,26 @@ if st.session_state.role == "Admin":
     
     with tab1:
         st.subheader("Assign New Task")
+        # Department selector outside form for dynamic updates
+        dept_col, _ = st.columns([1, 3])
+        with dept_col:
+            selected_dept = st.selectbox("📍 Select Department", ["Solar Installation", "Technical Support", "Sales & Marketing", "HR & Admin", "Accounts"], key="admin_dept_select")
+        
+        # Fetch employees based on selected department
+        emps_df = pd.read_sql("SELECT username, full_name FROM users WHERE role='Employee' AND dept=?", get_db(), params=(selected_dept,))
+        employee_list = [f"{row['full_name']} ({row['username']})" for _, row in emps_df.iterrows()] if not emps_df.empty else ["No employees in this department"]
+        
+        st.info(f"📍 Found **{len(employee_list)}** employee(s) in **{selected_dept}**")
+        
         with st.form("assign_task", clear_on_submit=True):
             desc = st.text_area("Task Description", height=140)
             c1, c2, c3, c4 = st.columns(4)
-            dept = c1.selectbox("Department", ["Solar Installation", "Technical Support", "Sales & Marketing", "HR & Admin", "Accounts"])
             
-            emps_df = pd.read_sql("SELECT username, full_name FROM users WHERE role='Employee' AND dept=?", get_db(), params=(dept,))
-            employee_list = [f"{row['full_name']} ({row['username']})" for _, row in emps_df.iterrows()] if not emps_df.empty else ["No employees in this department"]
+            # Department (hidden, using selected_dept from outside)
+            dept = selected_dept
             
-            selected_emp = c2.selectbox("Assign To", employee_list)
-            assigned_to = selected_emp.split("(")[-1].strip(")") if "(" in selected_emp else None
+            selected_emp = c2.selectbox("👤 Assign To", employee_list, key="form_emp_select")
+            assigned_to = selected_emp.split("(")[-1].strip(")") if "(" in selected_emp and selected_emp != "No employees in this department" else None
             
             priority = c3.selectbox("Priority", ["High", "Medium", "Low"])
             frequency = c4.selectbox("Frequency", ["Daily", "Weekly", "Fortnightly", "One-Time"])
@@ -291,30 +278,46 @@ if st.session_state.role == "Admin":
             due_date = col_date.date_input("Due Date", datetime.now().date() + timedelta(days=7))
             due_time = col_time.time_input("Due Time (Deadline)", value=datetime.now().time())
             
-            admin_file = st.file_uploader("Attach Resources (PDF, Excel, Video, Image)", 
-                                        type=["pdf", "xlsx", "xls", "mp4", "jpg", "png", "jpeg"])
+            admin_file = st.file_uploader("📎 Attach Resources (PDF, Excel, Video, Image) - Upload Multiple Files", 
+                                        type=["pdf", "xlsx", "xls", "mp4", "jpg", "png", "jpeg", "doc", "docx", "txt"],
+                                        accept_multiple_files=True)
             
             if st.form_submit_button("🚀 Assign Task"):
-                if desc and assigned_to:
-                    file_path = ""
-                    if admin_file:
-                        os.makedirs("attachments", exist_ok=True)
-                        file_ext = admin_file.name.split('.')[-1]
-                        final_path = os.path.join("attachments", f"proof_{['id']}_{uuid.uuid4().hex[:5]}.{file_ext}")
-                        os.makedirs(os.path.dirname(final_path), exist_ok=True)
-                        with open(file_path, "wb") as f:
-                            f.write(admin_file.getbuffer())
-                    
-                    conn = get_db()
-                    conn.execute("""INSERT INTO tasks 
-                                 (description, assigned_to, dept, status, priority, frequency, due_date, due_time, admin_file, timestamp)
-                                 VALUES (?,?,?,?,?,?,?,?,?,?)""",
-                                 (desc, assigned_to, dept, "Pending", priority, frequency, 
-                                  due_date.strftime("%Y-%m-%d"), due_time.strftime("%H:%M"), file_path, datetime.now().strftime("%Y-%m-%d %H:%M")))
-                    conn.commit()
-                    conn.close()
-                    st.success("✅ Work Assigned Successfully with Deadline!")
-                    st.rerun()
+                if not desc:
+                    st.error("❌ Please enter a task description.")
+                elif not assigned_to:
+                    st.error("❌ Please select an employee from the selected department.")
+                else:
+                    try:
+                        admin_files_json = "[]"
+                        if admin_file:
+                            os.makedirs(ATTACHMENT_PATH, exist_ok=True)
+                            file_paths = []
+                            for uploaded_file in admin_file:
+                                file_ext = uploaded_file.name.split('.')[-1]
+                                file_path = os.path.join(ATTACHMENT_PATH, f"admin_{uuid.uuid4().hex[:8]}.{file_ext}")
+                                with open(file_path, "wb") as f:
+                                    f.write(uploaded_file.getbuffer())
+                                file_paths.append(file_path)
+                            admin_files_json = json.dumps(file_paths)
+                        
+                        conn = get_db()
+                        conn.execute("""INSERT INTO tasks 
+                                     (description, assigned_to, dept, status, priority, frequency, due_date, due_time, admin_file, admin_files_json, timestamp)
+                                     VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                                     (desc, assigned_to, dept, "Pending", priority, frequency, 
+                                      due_date.strftime("%Y-%m-%d"), due_time.strftime("%H:%M"), 
+                                      admin_files_json[:1] if admin_files_json != "[]" else "", 
+                                      admin_files_json, 
+                                      datetime.now().strftime("%Y-%m-%d %H:%M")))
+                        conn.commit()
+                        conn.close()
+                        st.success("✅ Task Assigned Successfully!")
+                        st.info(f"📎 {len(json.loads(admin_files_json))} file(s) attached")
+                        st.balloons()
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Error assigning task: {str(e)}")
 
     with tab2:
         st.subheader("👥 Team Member Directory")
@@ -344,7 +347,7 @@ if st.session_state.role == "Admin":
             
             tasks_df = pd.read_sql(""" 
                 SELECT id, description, status, priority, frequency, due_date, 
-                       emp_remark, emp_screenshot 
+                       emp_remark, emp_screenshot, emp_files_json
                 FROM tasks 
                 WHERE assigned_to = ?
             """, get_db(), params=(member['username'],))
@@ -360,13 +363,36 @@ if st.session_state.role == "Admin":
                         if row.get('emp_remark'):
                             st.write(f"**Employee Remark:** {row['emp_remark']}")
                         
-                        if row.get('emp_screenshot') and os.path.exists(row['emp_screenshot']):
-                            try:
-                                st.image(row['emp_screenshot'], width=400, caption="📸 Screenshot Uploaded by Employee")
-                            except:
-                                st.warning("Unable to load screenshot preview")
-                        else:
-                            st.info("No screenshot uploaded yet.")
+                        # Display multiple uploaded files
+                        try:
+                            emp_files_json = row.get('emp_files_json', '[]')
+                            emp_files = json.loads(emp_files_json) if emp_files_json else []
+                            
+                            if emp_files:
+                                st.subheader("📎 Uploaded Files")
+                                for file_path in emp_files:
+                                    if os.path.exists(file_path):
+                                        file_name = os.path.basename(file_path)
+                                        file_ext = file_name.split('.')[-1].lower()
+                                        
+                                        col1, col2 = st.columns([3, 1])
+                                        with col1:
+                                            st.write(f"📄 {file_name}")
+                                        with col2:
+                                            try:
+                                                with open(file_path, "rb") as f:
+                                                    st.download_button(
+                                                        label="⬇️ Download",
+                                                        data=f.read(),
+                                                        file_name=file_name,
+                                                        key=f"download_{row['id']}_{os.path.basename(file_path)}"
+                                                    )
+                                            except:
+                                                st.write("Unable to download")
+                            else:
+                                st.info("No files uploaded yet.")
+                        except Exception as e:
+                            st.warning(f"Error loading files: {str(e)}")
                         
                         st.divider()
 
@@ -403,14 +429,14 @@ if st.session_state.role == "Admin":
                         st.rerun()
                 
                 with col2:
-                    if st.form_submit_button("🗑️ Delete Task", type="secondary"):
-                        if st.checkbox("Are you sure you want to delete this task?"):
-                            conn = get_db()
-                            conn.execute("DELETE FROM tasks WHERE id=?", (task_id,))
-                            conn.commit()
-                            conn.close()
-                            st.success("Task deleted successfully!")
-                            st.rerun()
+                    confirm = st.checkbox("⚠️ I confirm I want to delete this task")
+                    if st.form_submit_button("🗑️ Delete Task", type="secondary", disabled=not confirm):
+                        conn = get_db()
+                        conn.execute("DELETE FROM tasks WHERE id=?", (task_id,))
+                        conn.commit()
+                        conn.close()
+                        st.success("Task deleted successfully!")
+                        st.rerun()
 
     with tab4:
         st.subheader("📊 Overall Dashboard & Task Analytics")
@@ -557,6 +583,7 @@ elif st.session_state.role == "Employee":
     with tab_tasks:
         conn = get_db()
         tasks = pd.read_sql("SELECT * FROM tasks WHERE assigned_to = ?", conn, params=(st.session_state.user,))
+        conn.close()
         
         if tasks.empty:
             st.info("No tasks assigned to you yet.")
@@ -566,45 +593,81 @@ elif st.session_state.role == "Employee":
                     st.subheader(f"Task: {row['description']}")
                     st.warning(f"⏰ **Deadline:** {row['due_date']} at {row.get('due_time', 'Not set')}")
                     
-                    # Resources Section
-                    if row.get('admin_file') and os.path.exists(row['admin_file']):
-                        file_ext = row['admin_file'].split('.')[-1].lower()
-                        with open(row['admin_file'], "rb") as f:
-                            st.download_button(
-                                label=f"Download Admin Brief ({file_ext.upper()})",
-                                data=f,
-                                file_name=f"task_{row['id']}_brief.{file_ext}",
-                                key=f"dl_{row['id']}"
-                            )
+                    # Resources Section - Display multiple admin files
+                    try:
+                        admin_files_json = row.get('admin_files_json', '[]')
+                        admin_files = json.loads(admin_files_json) if admin_files_json else []
+                        
+                        if admin_files:
+                            st.subheader("📦 Resources from Admin")
+                            for file_path in admin_files:
+                                if os.path.exists(file_path):
+                                    file_name = os.path.basename(file_path)
+                                    file_ext = file_name.split('.')[-1].lower()
+                                    
+                                    col1, col2 = st.columns([3, 1])
+                                    with col1:
+                                        st.write(f"📄 {file_name}")
+                                    with col2:
+                                        try:
+                                            with open(file_path, "rb") as f:
+                                                st.download_button(
+                                                    label="⬇️",
+                                                    data=f.read(),
+                                                    file_name=file_name,
+                                                    key=f"admin_dl_{row['id']}_{os.path.basename(file_path)}"
+                                                )
+                                        except:
+                                            st.write("❌")
+                    except Exception as e:
+                        st.warning(f"Error loading resources: {str(e)}")
                     
                     st.divider()
                     
                     col_status, col_upload = st.columns(2)
                     with col_status:
-                        new_status = st.selectbox("Update Status", ["Pending", "In Progress", "Work Completed","Need Help"],key=f"s_{row['id']}")
+                        new_status = st.selectbox("Update Status", ["Pending", "In Progress", "Work Completed"], key=f"s_{row['id']}")
                         remark = st.text_area("Notes", value=row.get('emp_remark', ''), key=f"r_{row['id']}")
                     with col_upload:
-                        proof_file = st.file_uploader("Upload Proof (PDF/Excel/Video/Image)", key=f"p_{row['id']}")
+                        proof_file = st.file_uploader("📎 Upload Proof/Attachments - Multiple Files", 
+                                                     type=["pdf", "xlsx", "xls", "mp4", "jpg", "png", "jpeg", "doc", "docx", "txt"],
+                                                     key=f"p_{row['id']}", accept_multiple_files=True)
 
                     if st.button("🚀 Submit Update", key=f"b_{row['id']}", type="primary"):
-                        # Logic to save file and update DB (Same as previous step)
-                        final_path = row.get('emp_screenshot')
-                        if proof_file:
-                            file_ext = proof_file.name.split('.')[-1]
-                            final_path = os.path.join("attachments", f"proof_{row['id']}_{uuid.uuid4().hex[:5]}.{file_ext}")
-                            os.makedirs(os.path.dirname(final_path), exist_ok=True)
-                            with open(final_path, "wb") as f:
-                                f.write(proof_file.getbuffer())
-                        
-                        conn.execute("UPDATE tasks SET status=?, emp_remark=?, emp_screenshot=? WHERE id=?", 
-                                     (new_status, remark, final_path, row['id']))
-                        conn.commit()
-                        st.success("✅ Your update has been sent to HR successfully!")  
-                        st.toast("Sent to HR ✅") 
-                        st.caption(f"Submitted on: {datetime.now().strftime('%d-%m-%Y %H:%M')}")
-                        
-                        st.rerun()
-        conn.close()
+                        try:
+                            # Logic to save multiple files and update DB
+                            emp_files_json = row.get('emp_files_json', '[]')
+                            if emp_files_json == '[]' or not emp_files_json:
+                                emp_files_json = '[]'
+                            
+                            current_files = json.loads(emp_files_json) if emp_files_json else []
+                            
+                            if proof_file:
+                                os.makedirs(ATTACHMENT_PATH, exist_ok=True)
+                                for uploaded_file in proof_file:
+                                    file_ext = uploaded_file.name.split('.')[-1]
+                                    file_path = os.path.join(ATTACHMENT_PATH, f"proof_{row['id']}_{uuid.uuid4().hex[:5]}.{file_ext}")
+                                    with open(file_path, "wb") as f:
+                                        f.write(uploaded_file.getbuffer())
+                                    current_files.append(file_path)
+                            
+                            final_files_json = json.dumps(current_files)
+                            
+                            conn = get_db()
+                            conn.execute("UPDATE tasks SET status=?, emp_remark=?, emp_screenshot=?, emp_files_json=? WHERE id=?", 
+                                         (new_status, remark, final_files_json[:1] if final_files_json != "[]" else "", 
+                                          final_files_json, row['id']))
+                            conn.commit()
+                            conn.close()
+                            
+                            st.success("✅ Work updated successfully!")
+                            st.info(f"✔️ Status: {new_status} | {len(current_files)} file(s) uploaded | Saved at {datetime.now().strftime('%H:%M:%S')}")
+                            st.balloons()
+                            import time
+                            time.sleep(2)
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ Error updating task: {str(e)}")
 
     with tab_security:
         st.subheader("Update Your Password")
