@@ -256,9 +256,13 @@ if st.session_state.role == "Admin":
         
         # Fetch employees based on selected department
         emps_df = pd.read_sql("SELECT username, full_name FROM users WHERE role='Employee' AND dept=?", get_db(), params=(selected_dept,))
-        employee_list = [f"{row['full_name']} ({row['username']})" for _, row in emps_df.iterrows()] if not emps_df.empty else ["No employees in this department"]
+        employee_list = [f"{row['full_name']} ({row['username']})" for _, row in emps_df.iterrows()]
         
-        st.info(f"📍 Found **{len(employee_list)}** employee(s) in **{selected_dept}**")
+        if emps_df.empty:
+            st.warning(f"📍 No employees found in **{selected_dept}**.")
+        else:
+            st.success(f"📍 Found **{len(emps_df)}** employee(s) in **{selected_dept}**")
+            st.write(", ".join([row['full_name'] for _, row in emps_df.iterrows()]))
         
         with st.form("assign_task", clear_on_submit=True):
             desc = st.text_area("Task Description", height=140)
@@ -267,8 +271,12 @@ if st.session_state.role == "Admin":
             # Department (hidden, using selected_dept from outside)
             dept = selected_dept
             
-            selected_emp = c2.selectbox("👤 Assign To", employee_list, key="form_emp_select")
-            assigned_to = selected_emp.split("(")[-1].strip(")") if "(" in selected_emp and selected_emp != "No employees in this department" else None
+            if emps_df.empty:
+                c2.write("No employees available for assignment.")
+                assigned_to = None
+            else:
+                selected_emp = c2.selectbox("👤 Assign To", employee_list, key="form_emp_select")
+                assigned_to = selected_emp.split("(")[-1].strip(")") if "(" in selected_emp else None
             
             priority = c3.selectbox("Priority", ["High", "Medium", "Low"])
             frequency = c4.selectbox("Frequency", ["Daily", "Weekly", "Fortnightly", "One-Time"])
