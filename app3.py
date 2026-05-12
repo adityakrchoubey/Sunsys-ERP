@@ -151,8 +151,8 @@ import streamlit.components.v1 as components
 col1, col2, col3 = st.columns([1.2, 3.5, 2.2])
 
 with col1:
-    if os.path.exists("sunsys logo.jpeg"):
-        st.image("sunsys logo.jpeg", width=200)
+    if os.path.exists("sunsys logo.png"):
+        st.image("sunsys logo.png", width=200)
     else:
         st.title("☀️ SunSys")
 
