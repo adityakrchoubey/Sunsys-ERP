@@ -152,7 +152,7 @@ col1, col2, col3 = st.columns([1.2, 3.5, 2.2])
 
 with col1:
     if os.path.exists("sunsys logo.png"):
-        st.image("sunsys logo.png", width=200)
+        st.image("sunsys logo.png", width=400)
     else:
         st.title("☀️ SunSys")
 
