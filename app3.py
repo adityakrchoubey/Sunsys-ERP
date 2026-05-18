@@ -151,8 +151,8 @@ import streamlit.components.v1 as components
 col1, col2, col3 = st.columns([1.2, 3.5, 2.2])
 
 with col1:
-    if os.path.exists("sunsys logo.png"):
-        st.image("sunsys logo.png", width=600)
+    if os.path.exists("sunsys logo.jpeg"):
+        st.image("sunsys logo.jpeg", width=200)
     else:
         st.title("☀️ SunSys")
 
@@ -205,7 +205,7 @@ def login_page():
                 try:
                     conn = sqlite3.connect(DB_PATH)
                     result = conn.execute("SELECT dept FROM users WHERE username=? AND password=? AND role='Admin'", 
-                                        (username, password)).fetchone()
+                                        (username.strip(), password.strip())).fetchone()
                     if result:
                         st.session_state.update({"auth": True, "role": "Admin", "user": username})
                         st.rerun()
@@ -223,13 +223,19 @@ def login_page():
             if st.button("Enter My Department Center", use_container_width=True):
                 try:
                     conn = sqlite3.connect(DB_PATH)
+                    # Strip whitespace from inputs for comparison
                     result = conn.execute("SELECT dept FROM users WHERE username=? AND password=? AND role='Employee'", 
-                                        (username, password)).fetchone()
-                    if result and result[0] == selected_dept:
-                        st.session_state.update({"auth": True, "role": "Employee", "user": username, "dept": selected_dept})
-                        st.rerun()
+                                        (username.strip(), password.strip())).fetchone()
+                    if result:
+                        stored_dept = result[0].strip() if result[0] else ""
+                        selected_dept_clean = selected_dept.strip()
+                        if stored_dept == selected_dept_clean:
+                            st.session_state.update({"auth": True, "role": "Employee", "user": username, "dept": selected_dept})
+                            st.rerun()
+                        else:
+                            st.error(f"❌ Department mismatch. Your registered department is '{stored_dept}' but you selected '{selected_dept_clean}'")
                     else:
-                        st.error("❌ Invalid credentials or wrong Department Center selected")
+                        st.error("❌ Invalid username or password")
                 finally:
                     conn.close()
 
@@ -538,16 +544,17 @@ if st.session_state.role == "Admin":
                     if full_name and username and password and dept:
                         try:
                             conn = get_db()
+                            # Strip whitespace from inputs to avoid login issues
                             conn.execute("""INSERT INTO users 
                                          (username, password, full_name, dept, designation, phone, role) 
                                          VALUES (?,?,?,?,?,?,?)""",
-                                         (username, password, full_name, dept, designation, phone, "Employee"))
+                                         (username.strip(), password.strip(), full_name.strip(), dept.strip(), designation.strip(), phone.strip(), "Employee"))
                             conn.commit()
                             conn.close()
                             st.success(f"✅ Employee **{full_name}** added!")
                             st.rerun()
                         except Exception as e:
-                            st.error(f"❌ Username '{username}' already exists.")
+                            st.error(f"❌ Username '{username}' already exists or error: {str(e)}")
                     else:
                         st.error("Please fill all required fields (*)")
 
@@ -690,7 +697,7 @@ elif st.session_state.role == "Employee":
                 conn = get_db()
                 # Verify current password
                 user_data = conn.execute("SELECT password FROM users WHERE username=?", 
-                                        (st.session_state.user,)).fetchone()
+                                        (st.session_state.user.strip(),)).fetchone()
                 
                 if not current_pass or not new_pass:
                     st.error("Please fill all fields.")
