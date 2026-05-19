@@ -10,7 +10,9 @@ import base64
 import json   
 
 # 1. PATH SETUP
-DATA_FOLDER = "data"
+# Use an absolute data folder next to this script so the DB persists across restarts
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_FOLDER = os.path.join(BASE_DIR, "data")
 os.makedirs(DATA_FOLDER, exist_ok=True)
 DB_PATH = os.path.join(DATA_FOLDER, "sunsys_erp.db")
 ATTACHMENT_PATH = os.path.join(DATA_FOLDER, "attachments")
@@ -55,13 +57,9 @@ def init_db():
 init_db()
 # ===================================================================
 
-path = os.path.join(DATA_FOLDER, "attachments")
 
-if os.path.isfile(path):
-    os.remove(path) 
-    os.makedirs(path, exist_ok=True)
-else:
-    os.makedirs(path, exist_ok=True)        
+# Ensure attachments folder exists (do not delete files on restart)
+os.makedirs(ATTACHMENT_PATH, exist_ok=True)
 
 
 # ====================== DATABASE SETUP ======================
