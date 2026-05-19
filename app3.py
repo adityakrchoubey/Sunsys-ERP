@@ -149,8 +149,8 @@ import streamlit.components.v1 as components
 col1, col2, col3 = st.columns([1.2, 3.5, 2.2])
 
 with col1:
-    if os.path.exists("sunsys logo.png"):
-        st.image("sunsys logo.png", width=200)
+    if os.path.exists("sunsys logo.jpeg"):
+        st.image("sunsys logo.jpeg", width=200)
     else:
         st.title("☀️ SunSys")
 
@@ -245,11 +245,48 @@ if st.sidebar.button("🚪 Logout"):
     st.session_state.auth = False
     st.rerun()
 
+# ====================== HELPER FUNCTION: GET RECENTLY UPDATED TASKS ======================
+def get_recent_task_updates(hours=24):
+    """Fetch tasks updated in the last N hours with employee details"""
+    cutoff_time = (datetime.now() - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M")
+    conn = get_db()
+    recent_tasks = pd.read_sql("""
+        SELECT 
+            t.id,
+            t.description,
+            t.assigned_to,
+            u.full_name,
+            t.status,
+            t.priority,
+            t.emp_remark,
+            t.timestamp as assigned_date,
+            CASE WHEN t.emp_remark != '' AND t.emp_remark IS NOT NULL THEN datetime('now') ELSE NULL END as updated_time
+        FROM tasks t
+        LEFT JOIN users u ON t.assigned_to = u.username
+        WHERE (t.emp_remark IS NOT NULL AND t.emp_remark != '')
+           OR (t.status IN ('In Progress', 'Need Help', 'Work Completed'))
+        ORDER BY t.id DESC
+        LIMIT 20
+    """, conn)
+    conn.close()
+    return recent_tasks
+
+def get_status_badge_color(status):
+    """Return color based on task status"""
+    if status == "Work Completed":
+        return "🟢 Completed"
+    elif status == "In Progress":
+        return "🟡 In Progress"
+    elif status == "Need Help":
+        return "🔴 Need Help"
+    else:
+        return "⚪ Pending"
+
 # ====================== ADMIN PANEL ======================
 if st.session_state.role == "Admin":
     st.header("📊 HR Command Center")
     
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📋 Assign Task", "👥 Team Overview", "✏️ Edit/Delete", "📊 Dashboard", "➕ Add/Remove Employee"])
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📋 Assign Task", "👥 Team Overview", "✏️ Edit/Delete", "📊 Dashboard", "➕ Add/Remove Employee", "🔔 Live Updates"])
     
     with tab1:
         st.subheader("Assign New Task")
@@ -369,11 +406,26 @@ if st.session_state.role == "Admin":
             else:
                 for _, row in tasks_df.iterrows():
                     with st.container(border=True):
-                        st.write(f"**Task:** {row['description']}")
-                        st.caption(f"Status: **{row['status']}** | Priority: **{row['priority']}** | Frequency: **{row['frequency']}** | Due: **{row.get('due_date','N/A')}**")
+                        # Status indicator with badge
+                        col_title, col_badge = st.columns([3, 1])
+                        with col_title:
+                            st.write(f"**Task:** {row['description']}")
+                        with col_badge:
+                            st.markdown(f"### {get_status_badge_color(row['status'])}")
+                        
+                        col_main, col_priority = st.columns([3, 1])
+                        with col_main:
+                            st.caption(f"Frequency: **{row['frequency']}** | Due: **{row.get('due_date','N/A')}**")
+                        with col_priority:
+                            if row['priority'] == 'High':
+                                st.error("🔴 HIGH PRIORITY")
+                            elif row['priority'] == 'Medium':
+                                st.warning("🟡 MEDIUM PRIORITY")
+                            else:
+                                st.info("🟢 LOW PRIORITY")
                         
                         if row.get('emp_remark'):
-                            st.write(f"**Employee Remark:** {row['emp_remark']}")
+                            st.success(f"💬 **Employee Note:** _{row['emp_remark']}_")
                         
                         # Display multiple uploaded files
                         try:
@@ -491,21 +543,36 @@ if st.session_state.role == "Admin":
         """, get_db())
         
         if not detailed_df.empty:
-            st.dataframe(
-                detailed_df,
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "task_description": st.column_config.TextColumn("Task Description", width="medium"),
-                    "employee_name": st.column_config.TextColumn("Employee Name"),
-                    "department": st.column_config.TextColumn("Department"),
-                    "status": st.column_config.TextColumn("Status"),
-                    "priority": st.column_config.TextColumn("Priority"),
-                    "due_date": st.column_config.TextColumn("Due Date"),
-                    "assigned_date": st.column_config.TextColumn("Assigned On"),
-                    "employee_remark": st.column_config.TextColumn("Employee Remark")
-                }
-            )
+            # Display tasks with visual indicators
+            for idx, (_, row) in enumerate(detailed_df.iterrows()):
+                with st.container(border=True):
+                    col1, col2, col3 = st.columns([2, 1, 1])
+                    
+                    with col1:
+                        st.markdown(f"**Task #{row['id']}:** {row['task_description'][:60]}...")
+                        st.caption(f"👤 {row['employee_name']} | 🏢 {row['department']}")
+                    
+                    with col2:
+                        st.markdown(f"### {get_status_badge_color(row['status'])}")
+                    
+                    with col3:
+                        if row['priority'] == 'High':
+                            st.error("🔴 HIGH")
+                        elif row['priority'] == 'Medium':
+                            st.warning("🟡 MEDIUM")
+                        else:
+                            st.info("🟢 LOW")
+                    
+                    col_info1, col_info2, col_info3 = st.columns(3)
+                    with col_info1:
+                        st.caption(f"📅 Due: {row['due_date']}")
+                    with col_info2:
+                        st.caption(f"🔄 Frequency: {row['frequency']}")
+                    with col_info3:
+                        st.caption(f"📌 Assigned: {row['assigned_date'][:10]}")
+                    
+                    if row['employee_remark']:
+                        st.info(f"💬 **Employee Update:** {row['employee_remark']}")
         else:
             st.info("No tasks have been assigned yet.")
         
@@ -582,6 +649,77 @@ if st.session_state.role == "Admin":
                         st.rerun()
                     else:
                         st.error("Please check the confirmation box first.")
+
+    with tab6:
+        st.subheader("🔔 Live Task Update Notifications")
+        st.info("📬 Real-time updates when employees submit task progress")
+        
+        # Refresh button
+        col_refresh, col_filter = st.columns([1, 3])
+        with col_refresh:
+            if st.button("🔄 Refresh Now", use_container_width=True, type="primary"):
+                st.rerun()
+        
+        with col_filter:
+            show_hours = st.slider("Show updates from last (hours)", 1, 168, 24)
+        
+        st.divider()
+        
+        # Get recent updates
+        recent_updates = get_recent_task_updates(show_hours)
+        
+        if recent_updates.empty:
+            st.info("✨ No task updates in the selected time period.")
+        else:
+            # Summary cards
+            col1, col2, col3, col4 = st.columns(4)
+            
+            completed_count = len(recent_updates[recent_updates['status'] == 'Work Completed'])
+            in_progress_count = len(recent_updates[recent_updates['status'] == 'In Progress'])
+            need_help_count = len(recent_updates[recent_updates['status'] == 'Need Help'])
+            
+            with col1:
+                st.metric("🟢 Completed", completed_count)
+            with col2:
+                st.metric("🟡 In Progress", in_progress_count)
+            with col3:
+                st.metric("🔴 Need Help", need_help_count)
+            with col4:
+                st.metric("📊 Total Updates", len(recent_updates))
+            
+            st.divider()
+            st.subheader("📋 Recent Activity")
+            
+            # Display updates with visual indicators
+            for idx, (_, row) in enumerate(recent_updates.iterrows()):
+                with st.container(border=True):
+                    col_status, col_priority = st.columns([2, 1])
+                    
+                    with col_status:
+                        st.markdown(f"**{row['full_name']}** - {get_status_badge_color(row['status'])}")
+                        st.caption(f"📌 Task ID: {row['id']} | Priority: {row['priority']}")
+                        st.write(f"📝 {row['description'][:100]}..." if len(str(row['description'])) > 100 else f"📝 {row['description']}")
+                    
+                    with col_priority:
+                        if row['priority'] == 'High':
+                            st.error("🔴 HIGH")
+                        elif row['priority'] == 'Medium':
+                            st.warning("🟡 MEDIUM")
+                        else:
+                            st.info("🟢 LOW")
+                    
+                    if row['emp_remark']:
+                        st.markdown(f"**Employee Note:** _{row['emp_remark']}_")
+                    
+                    # Action buttons
+                    col_view, col_contact = st.columns(2)
+                    with col_view:
+                        if st.button(f"👁️ View Full Details", key=f"view_{row['id']}", use_container_width=True):
+                            st.session_state.expand_task = row['id']
+                            st.rerun()
+                    with col_contact:
+                        if row['id'] and not pd.isna(row['id']):
+                            st.info(f"✅ Last update received")
 
     st.divider()
     st.caption("© 2026 SunSys ERP Portal by Aditya kumar | All rights reserved.")
