@@ -557,6 +557,7 @@ def fetch_task_status_counts():
 
     return [dict(row) for row in rows]
 
+def update 
 
 
 
