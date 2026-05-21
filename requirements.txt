@@ -4,5 +4,3 @@ Pillow
 sqlalchemy
 psycopg2-binary
 supabase
-plotly
-numpy
