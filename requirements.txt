@@ -1,3 +1,5 @@
 streamlit
 pandas
 Pillow
+sqlalchemy
+psycopg2-binary
