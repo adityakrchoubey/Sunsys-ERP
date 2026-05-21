@@ -1,1 +1,6 @@
 
+SUPABASE_URL = "https://qjyzrbfhdupirpbiyszx.supabase.co"
+
+SUPABASE_KEY = "sb_publishable_gcD3hajwg3NbBXo03qk_Gg_p839sYEg"
+
+DATABASE_URL = "postgresql://postgres:Choubey@241154@db.qjyzrbfhdupirpbiyszx.supabase.co:5432/postgres"
