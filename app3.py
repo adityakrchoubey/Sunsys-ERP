@@ -10,7 +10,12 @@ import base64
 import json   
 import secrets
 from urllib.parse import urlparse, urlunparse
-from supabase import create_client
+try:
+    from supabase import create_client
+    SUPABASE_AVAILABLE = True
+except ModuleNotFoundError:
+    create_client = None
+    SUPABASE_AVAILABLE = False
 
 # 1. PATH SETUP
 # Use an absolute data folder next to this script so the DB persists across restarts
@@ -21,15 +26,25 @@ DB_PATH = os.path.join(DATA_FOLDER, "sunsys_erp.db")
 ATTACHMENT_PATH = os.path.join(DATA_FOLDER, "attachments")
 os.makedirs(ATTACHMENT_PATH, exist_ok=True)
 
-raw_supabase_url = st.secrets["SUPABASE_URL"].rstrip("/")
-parsed_url = urlparse(raw_supabase_url)
-if parsed_url.path and parsed_url.path != "/":
-    raw_supabase_url = urlunparse((parsed_url.scheme, parsed_url.netloc, "", "", "", ""))
+supabase = None
+if SUPABASE_AVAILABLE:
+    try:
+        raw_supabase_url = st.secrets.get("SUPABASE_URL", "").rstrip("/")
+        if not raw_supabase_url:
+            raise ValueError("SUPABASE_URL not set in Streamlit secrets")
+        parsed_url = urlparse(raw_supabase_url)
+        if parsed_url.path and parsed_url.path != "/":
+            raw_supabase_url = urlunparse((parsed_url.scheme, parsed_url.netloc, "", "", "", ""))
 
-supabase = create_client(
-    raw_supabase_url,
-    st.secrets["SUPABASE_KEY"]
-)
+        supabase = create_client(
+            raw_supabase_url,
+            st.secrets.get("SUPABASE_KEY", "")
+        )
+    except Exception as e:
+        supabase = None
+        st.warning(f"Supabase client initialization failed: {e}")
+else:
+    st.warning("Python package 'supabase' is not installed. Supabase features are disabled. Install with `pip install supabase` or add it to requirements.txt before deploying.")
 
 # 2. UPDATED GET_DB
 def get_db():
@@ -103,6 +118,8 @@ migrate_db()
     
 
 def get_supabase_public_url(file_name):
+    if not supabase:
+        raise RuntimeError("Supabase client is not initialized. Install 'supabase' package and set SUPABASE_URL and SUPABASE_KEY in Streamlit secrets.")
     response = supabase.storage.from_("attachments").get_public_url(file_name)
     if isinstance(response, dict):
         return response.get("publicUrl") or response.get("data", {}).get("publicUrl")
@@ -112,6 +129,8 @@ def get_supabase_public_url(file_name):
 
 
 def save_file_to_supabase(uploaded_file, prefix):
+    if not supabase:
+        raise RuntimeError("Supabase client is not initialized. Cannot upload files. Install 'supabase' and configure secrets.")
     file_name = uploaded_file.name
     file_ext = Path(file_name).suffix
     unique_name = f"{prefix}_{secrets.token_hex(10)}{file_ext}"
@@ -119,7 +138,7 @@ def save_file_to_supabase(uploaded_file, prefix):
     upload_response = supabase.storage.from_("attachments").upload(
         unique_name,
         file_bytes,
-        {"content-type": uploaded_file.type}
+        {"content-type": getattr(uploaded_file, "type", "application/octet-stream")}
     )
     if isinstance(upload_response, dict) and upload_response.get("error"):
         raise RuntimeError(upload_response["error"])
