@@ -557,64 +557,7 @@ def fetch_task_status_counts():
 
     return [dict(row) for row in rows]
 
-```
-
----
-
-# IMPORTANT STEPS
-
-## 1. requirements.txt
-
-Add these:
-
-```txt
-sqlalchemy
-psycopg2-binary
-streamlit
-```
-
----
-
-## 2. Streamlit Secrets
-
-Create:
-
-`.streamlit/secrets.toml`
-
-Add:
-
-```toml
-DATABASE_URL = "postgresql://postgres:PASSWORD@HOST:5432/postgres"
-```
-
-Get this from:
-
-* Supabase Dashboard
-* Settings
-* Database
-* Connection String
-
----
-
-## 3. Supabase Setup
-
-Create free account:
-
-[https://supabase.com](https://supabase.com)
-
-Then create project.
-
----
-
-## 4. Deploy Again
-
-Push updated code to GitHub.
-
-Then redeploy in Streamlit.
-
----
 
 
 
 
-✅ no auto delete problem
