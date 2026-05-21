@@ -1,8 +1,4 @@
-# Full PostgreSQL/Supabase Converted Database Code
 
-Replace your entire current `db.py` or database file with this code.
-
-```python
 import os
 import json
 import hashlib
