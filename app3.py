@@ -3,11 +3,14 @@ import sqlite3
 import pandas as pd
 from datetime import datetime, timedelta
 import os
+from pathlib import Path
 from PIL import Image
 import uuid
-import shutil
 import base64
 import json   
+import secrets
+from urllib.parse import urlparse, urlunparse
+from supabase import create_client
 
 # 1. PATH SETUP
 # Use an absolute data folder next to this script so the DB persists across restarts
@@ -17,6 +20,16 @@ os.makedirs(DATA_FOLDER, exist_ok=True)
 DB_PATH = os.path.join(DATA_FOLDER, "sunsys_erp.db")
 ATTACHMENT_PATH = os.path.join(DATA_FOLDER, "attachments")
 os.makedirs(ATTACHMENT_PATH, exist_ok=True)
+
+raw_supabase_url = st.secrets["SUPABASE_URL"].rstrip("/")
+parsed_url = urlparse(raw_supabase_url)
+if parsed_url.path and parsed_url.path != "/":
+    raw_supabase_url = urlunparse((parsed_url.scheme, parsed_url.netloc, "", "", "", ""))
+
+supabase = create_client(
+    raw_supabase_url,
+    st.secrets["SUPABASE_KEY"]
+)
 
 # 2. UPDATED GET_DB
 def get_db():
@@ -89,6 +102,33 @@ def migrate_db():
 migrate_db()
     
 
+def get_supabase_public_url(file_name):
+    response = supabase.storage.from_("attachments").get_public_url(file_name)
+    if isinstance(response, dict):
+        return response.get("publicUrl") or response.get("data", {}).get("publicUrl")
+    if hasattr(response, "data") and response.data:
+        return response.data.get("publicUrl")
+    return None
+
+
+def save_file_to_supabase(uploaded_file, prefix):
+    file_name = uploaded_file.name
+    file_ext = Path(file_name).suffix
+    unique_name = f"{prefix}_{secrets.token_hex(10)}{file_ext}"
+    file_bytes = uploaded_file.getvalue()
+    upload_response = supabase.storage.from_("attachments").upload(
+        unique_name,
+        file_bytes,
+        {"content-type": uploaded_file.type}
+    )
+    if isinstance(upload_response, dict) and upload_response.get("error"):
+        raise RuntimeError(upload_response["error"])
+    public_url = get_supabase_public_url(unique_name)
+    if not public_url:
+        raise RuntimeError("Failed to get Supabase public URL")
+    return public_url
+
+
 # ====================== HELPER FUNCTION TO DISPLAY PDF (New Feature) ======================
 def display_pdf(pdf_path):
     if pdf_path and os.path.exists(pdf_path):
@@ -149,8 +189,8 @@ import streamlit.components.v1 as components
 col1, col2, col3 = st.columns([1.2, 3.5, 2.2])
 
 with col1:
-    if os.path.exists("sunsys logo.png"):
-        st.image("sunsys logo.png", width=200)
+    if os.path.exists("sunsys logo.jpeg"):
+        st.image("sunsys logo.jpeg", width=200)
     else:
         st.title("☀️ SunSys")
 
@@ -340,14 +380,10 @@ if st.session_state.role == "Admin":
                     try:
                         admin_files_json = "[]"
                         if admin_file:
-                            os.makedirs(ATTACHMENT_PATH, exist_ok=True)
                             file_paths = []
                             for uploaded_file in admin_file:
-                                file_ext = uploaded_file.name.split('.')[-1]
-                                file_path = os.path.join(ATTACHMENT_PATH, f"admin_{uuid.uuid4().hex[:8]}.{file_ext}")
-                                with open(file_path, "wb") as f:
-                                    f.write(uploaded_file.getbuffer())
-                                file_paths.append(file_path)
+                                file_url = save_file_to_supabase(uploaded_file, f"admin_{uuid.uuid4().hex[:8]}")
+                                file_paths.append(file_url)
                             admin_files_json = json.dumps(file_paths)
                         
                         conn = get_db()
@@ -435,10 +471,10 @@ if st.session_state.role == "Admin":
                             if emp_files:
                                 st.subheader("📎 Uploaded Files")
                                 for file_path in emp_files:
-                                    if os.path.exists(file_path):
-                                        file_name = os.path.basename(file_path)
-                                        file_ext = file_name.split('.')[-1].lower()
-                                        
+                                    file_name = os.path.basename(file_path)
+                                    if file_path.startswith("http"):
+                                        st.markdown(f"[📄 {file_name}]({file_path})")
+                                    elif os.path.exists(file_path):
                                         col1, col2 = st.columns([3, 1])
                                         with col1:
                                             st.write(f"📄 {file_name}")
@@ -752,10 +788,10 @@ elif st.session_state.role == "Employee":
                         if admin_files:
                             st.subheader("📦 Resources from Admin")
                             for file_path in admin_files:
-                                if os.path.exists(file_path):
-                                    file_name = os.path.basename(file_path)
-                                    file_ext = file_name.split('.')[-1].lower()
-                                    
+                                file_name = os.path.basename(file_path)
+                                if file_path.startswith("http"):
+                                    st.markdown(f"[📄 {file_name}]({file_path})")
+                                elif os.path.exists(file_path):
                                     col1, col2 = st.columns([3, 1])
                                     with col1:
                                         st.write(f"📄 {file_name}")
@@ -794,13 +830,9 @@ elif st.session_state.role == "Employee":
                             current_files = json.loads(emp_files_json) if emp_files_json else []
                             
                             if proof_file:
-                                os.makedirs(ATTACHMENT_PATH, exist_ok=True)
                                 for uploaded_file in proof_file:
-                                    file_ext = uploaded_file.name.split('.')[-1]
-                                    file_path = os.path.join(ATTACHMENT_PATH, f"proof_{row['id']}_{uuid.uuid4().hex[:5]}.{file_ext}")
-                                    with open(file_path, "wb") as f:
-                                        f.write(uploaded_file.getbuffer())
-                                    current_files.append(file_path)
+                                    file_url = save_file_to_supabase(uploaded_file, f"proof_{row['id']}_{uuid.uuid4().hex[:5]}")
+                                    current_files.append(file_url)
                             
                             final_files_json = json.dumps(current_files)
                             
